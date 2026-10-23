@@ -1,0 +1,58 @@
+name: jruby-nokogiri-tomcat-matrix
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'   # viikoittain maanantaisin
+
+jobs:
+  test:
+    name: jruby ${{ matrix.jruby }} / nokogiri ${{ matrix.nokogiri }} / jruby-rack ${{ matrix.jruby_rack }} / tomcat ${{ matrix.tomcat }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        jruby:      ['9.4.12.0', '10.0.2.0']
+        nokogiri:   ['1.16.8', '1.18.9']
+        jruby_rack: ['1.1.21', '1.2.0']
+        tomcat:     ['9.0.98', '10.1.34']
+        exclude:
+          # jruby-rack 1.1.x käyttää javax.servlet -> ei toimi Tomcat 10+:ssa (jakarta)
+          - { jruby_rack: '1.1.21', tomcat: '10.1.34' }
+          # JRuby 10 vaatii uudemman jruby-rackin
+          - { jruby: '10.0.2.0', jruby_rack: '1.1.21' }
+    env:
+      JRUBY_VERSION: ${{ matrix.jruby }}
+      NOKOGIRI_VERSION: ${{ matrix.nokogiri }}
+      JRUBY_RACK_VERSION: ${{ matrix.jruby_rack }}
+      TOMCAT_VERSION: ${{ matrix.tomcat }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Valitse Java-versio
+        id: java
+        run: |
+          if [[ "${{ matrix.jruby }}" == 10.* ]]; then echo "v=21" >> "$GITHUB_OUTPUT"; else echo "v=17" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ steps.java.outputs.v }}
+
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: dl-${{ matrix.jruby }}-${{ matrix.jruby_rack }}-${{ matrix.tomcat }}
+
+      - name: Rakenna WAR, käynnistä Tomcat ja testaa
+        run: ./scripts/run.sh
+
+      - name: Tallenna lokit epäonnistuessa
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.jruby }}-${{ matrix.nokogiri }}-${{ matrix.jruby_rack }}-${{ matrix.tomcat }}
+          path: work/**/tomcat/logs/
